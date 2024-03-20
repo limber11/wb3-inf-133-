@@ -1,107 +1,101 @@
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from urllib.parse import urlparse, parse_qs
 
-estudiantes = [
-    {
-        "id": 1,
-        "nombre": "Pedrito",
-        "apellido": "García",
-        "carrera": "Ingeniería de Sistemas",
+# Base de datos simulada de publicaciones
+db = {
+    1: {
+        "title": "Mi primera publicación",
+        "content": "¡Hola mundo! Esta es mi primera publicación en el blog.",
     },
-    {
-        "id": 2,
-        "nombre": "Limber",
-        "apellido": "Lucia",
-        "carrera": "Turismo",
+    2: {
+        "title": "Otra publicación",
+        "content": "¡Bienvenidos a mi blog! Aquí hay otra publicación.",
     },
-    {
-        "id": 3,
-        "nombre": "Ana",
-        "apellido": "López",
-        "carrera": "Economía",
-    },
-    {
-        "id": 4,
-        "nombre": "Juan",
-        "apellido": "Pérez",
-        "carrera": "Economía",
-    },
-]
-
-carreras = {
-    "Ingeniería de Sistemas": [estudiantes[0]],
-    "Economía": [estudiantes[2], estudiantes[3]],
-    "Turismo": [estudiantes[1]],
 }
 
-class RESTRequestHandler(BaseHTTPRequestHandler):
+
+class BlogHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/carreras":
-            # Get all careers
-            self.send_response(200)
+        # Configurar las cabeceras de respuesta
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+
+        # Generar la respuesta JSON de acuerdo a la solicitud
+        if self.path == "/posts":
+            self.wfile.write(json.dumps(list(db.values())).encode())
+        elif self.path.startswith("/post/"):
+            post_id = int(self.path.split("/")[-1])
+            post = db.get(post_id)
+            if post:
+                self.wfile.write(json.dumps(post).encode())
+            else:
+                self.send_error(404, "Publicación no encontrada")
+        else:
+            self.send_error(404, "Ruta no válida")
+
+    def do_POST(self):
+        content_length = int(self.headers["Content-Length"])
+        post_data = self.rfile.read(content_length)
+        post_params = parse_qs(post_data.decode())
+
+        # Crear una nueva publicación
+        if self.path == "/posts":
+            title = post_params.get("title", [""])[0]
+            content = post_params.get("content", [""])[0]
+            new_post_id = max(db.keys()) + 1
+            db[new_post_id] = {"title": title, "content": content}
+            self.send_response(201)
             self.send_header("Content-type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(list(carreras.keys())).encode("utf-8"))
-        elif self.path.startswith("/carreras/"):
-            carrera_nombre = self.path.split("/")[-1]
-            if carrera_nombre in carreras:
-                # Get students by career
+            self.wfile.write(json.dumps({"id": new_post_id}).encode())
+        else:
+            self.send_error(404, "Ruta no válida")
+
+    def do_PUT(self):
+        # Actualizar una publicación existente
+        if self.path.startswith("/post/"):
+            post_id = int(self.path.split("/")[-1])
+            if post_id in db:
+                content_length = int(self.headers["Content-Length"])
+                post_data = self.rfile.read(content_length)
+                post_params = parse_qs(post_data.decode())
+                db[post_id]["title"] = post_params.get("title", [db[post_id]["title"]])[
+                    
+                ]
+                db[post_id]["content"] = post_params.get(
+                    "content", [db[post_id]["content"]]
+                )[0]
                 self.send_response(200)
                 self.send_header("Content-type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps(carreras[carrera_nombre]).encode("utf-8"))
+                self.wfile.write(json.dumps({"id": post_id}).encode())
             else:
-                # Career not found
-                self.send_response(404)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"Error": "Carrera no encontrada"}).encode("utf-8"))
+                self.send_error(404, "Publicación no encontrada")
         else:
-            # Route not found
-            self.send_response(404)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"Error": "Ruta no encontrada"}).encode("utf-8"))
+            self.send_error(404, "Ruta no válida")
 
-    def do_POST(self):
-        if self.path == "/estudiantes":
-            content_length = int(self.headers["Content-Length"])
-            post_data = self.rfile.read(content_length)
-            post_data = json.loads(post_data.decode("utf-8"))
-
-            # Check for required fields and validity (can be extended for additional checks)
-            if not all(field in post_data for field in ["nombre", "apellido", "carrera"]):
-                self.send_response(400)
-                self.send_header("Content-type", "application/json")
+    def do_DELETE(self):
+        # Eliminar una publicación existente
+        if self.path.startswith("/post/"):
+            post_id = int(self.path.split("/")[-1])
+            if post_id in db:
+                del db[post_id]
+                self.send_response(204)
                 self.end_headers()
-                self.wfile.write(json.dumps({"Error": "Campos faltantes o inválidos"}).encode("utf-8"))
-                return  # Exit early on error
-
-            # Assign unique ID and add student
-            post_data["id"] = len(estudiantes) + 1
-            estudiantes.append(post_data)
-            carreras.setdefault(post_data["carrera"], []).append(post_data)  # Add to career list
-
-            self.send_response(201)  # Created
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(post_data).encode("utf-8"))
+            else:
+                self.send_error(404, "Publicación no encontrada")
         else:
-            # Route not found
-            self.send_response(404)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"Error": "Ruta no encontrada"}).encode("utf-8"))
+            self.send_error(404, "Ruta no válida")
 
-def run_server(port=8000):
-    try:
-        server_address = ("", port)
-        httpd = HTTPServer(server_address, RESTRequestHandler)
-        print(f"Iniciando servidor web en http://localhost:{port}/")
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("Apagando servidor web")
-        httpd.socket.close()
-        
+
+def run_server(server_class=HTTPServer, handler_class=BlogHandler, port=8000):
+    server_address = ("", port)
+    httpd = server_class(server_address, handler_class)
+    print(f"Starting server on port {port}...")
+    httpd.serve_forever()
+
+
 if __name__ == "__main__":
     run_server()
