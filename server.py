@@ -1,101 +1,171 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
-from urllib.parse import urlparse, parse_qs
 
-# Base de datos simulada de publicaciones
-db = {
-    1: {
-        "title": "Mi primera publicación",
-        "content": "¡Hola mundo! Esta es mi primera publicación en el blog.",
-    },
-    2: {
-        "title": "Otra publicación",
-        "content": "¡Bienvenidos a mi blog! Aquí hay otra publicación.",
-    },
-}
+# Base de datos simulada de productos
+products = {}
 
 
-class BlogHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        # Configurar las cabeceras de respuesta
-        self.send_response(200)
-        self.send_header("Content-type", "application/json")
-        self.end_headers()
+class Product:
+    def __init__(self, product_type, weight, flavor, filling=None):
+        self.product_type = product_type
+        self.weight = weight
+        self.flavor = flavor
+        self.filling = filling
 
-        # Generar la respuesta JSON de acuerdo a la solicitud
-        if self.path == "/posts":
-            self.wfile.write(json.dumps(list(db.values())).encode())
-        elif self.path.startswith("/post/"):
-            post_id = int(self.path.split("/")[-1])
-            post = db.get(post_id)
-            if post:
-                self.wfile.write(json.dumps(post).encode())
-            else:
-                self.send_error(404, "Publicación no encontrada")
+
+class Tablet(Product):
+    def __init__(self, weight, flavor):
+        super().__init__("tablet", weight, flavor)
+
+
+class Candy(Product):
+    def __init__(self, weight, flavor, filling):
+        super().__init__("candy", weight, flavor, filling)
+
+
+class Truffle(Product):
+    def __init__(self, weight, flavor, filling):
+        super().__init__("truffle", weight, flavor, filling)
+
+
+class ProductFactory:
+    @staticmethod
+    def create_product(product_type, weight, flavor, filling=None):
+        if product_type == "tablet":
+            return Tablet(weight, flavor)
+        elif product_type == "candy":
+            return Candy(weight, flavor, filling)
+        elif product_type == "truffle":
+            return Truffle(weight, flavor, filling)
         else:
-            self.send_error(404, "Ruta no válida")
+            raise ValueError("Tipo de producto no válido")
+
+
+class HTTPDataHandler:
+    @staticmethod
+    def handle_response(handler, status, data):
+        handler.send_response(status)
+        handler.send_header("Content-type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(json.dumps(data).encode("utf-8"))
+
+    @staticmethod
+    def handle_reader(handler):
+        content_length = int(handler.headers["Content-Length"])
+        post_data = handler.rfile.read(content_length)
+        return json.loads(post_data.decode("utf-8"))
+
+
+class ProductService:
+    def __init__(self):
+        self.factory = ProductFactory()
+
+    def add_product(self, data):
+        product_type = data.get("product_type", None)
+        weight = data.get("weight", None)
+        flavor = data.get("flavor", None)
+        filling = data.get("filling", None) if product_type in ["candy", "truffle"] else None
+
+        product = self.factory.create_product(
+            product_type, weight, flavor, filling
+        )
+        products[len(products) + 1] = product
+        return product
+
+    def list_products(self):
+        return {index: product.__dict__ for index, product in products.items()}
+
+    def update_product(self, product_id, data):
+        if product_id in products:
+            product = products[product_id]
+            weight = data.get("weight", None)
+            flavor = data.get("flavor", None)
+            filling = data.get("filling", None) if product.product_type in ["candy", "truffle"] else None
+
+            if weight:
+                product.weight = weight
+            if flavor:
+                product.flavor = flavor
+            if filling:
+                product.filling = filling
+            return product
+        else:
+            raise None
+
+    def delete_product(self, product_id):
+        if product_id in products:
+            del products[product_id]
+            return {"message": "Producto eliminado"}
+        else:
+            return None
+
+
+class ProductRequestHandler(BaseHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        self.product_service = ProductService()
+        super().__init__(*args, **kwargs)
 
     def do_POST(self):
-        content_length = int(self.headers["Content-Length"])
-        post_data = self.rfile.read(content_length)
-        post_params = parse_qs(post_data.decode())
-
-        # Crear una nueva publicación
-        if self.path == "/posts":
-            title = post_params.get("title", [""])[0]
-            content = post_params.get("content", [""])[0]
-            new_post_id = max(db.keys()) + 1
-            db[new_post_id] = {"title": title, "content": content}
-            self.send_response(201)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"id": new_post_id}).encode())
+        if self.path == "/products":
+            data = HTTPDataHandler.handle_reader(self)
+            response_data = self.product_service.add_product(data)
+            HTTPDataHandler.handle_response(self, 201, response_data.__dict__)
         else:
-            self.send_error(404, "Ruta no válida")
+            HTTPDataHandler.handle_response(
+                self, 404, {"message": "Ruta no encontrada"}
+            )
+
+    def do_GET(self):
+        if self.path == "/products":
+            response_data = self.product_service.list_products()
+            HTTPDataHandler.handle_response(self, 200, response_data)
+        else:
+            HTTPDataHandler.handle_response(
+                self, 404, {"message": "Ruta no encontrada"}
+            )
 
     def do_PUT(self):
-        # Actualizar una publicación existente
-        if self.path.startswith("/post/"):
-            post_id = int(self.path.split("/")[-1])
-            if post_id in db:
-                content_length = int(self.headers["Content-Length"])
-                post_data = self.rfile.read(content_length)
-                post_params = parse_qs(post_data.decode())
-                db[post_id]["title"] = post_params.get("title", [db[post_id]["title"]])[
-                    
-                ]
-                db[post_id]["content"] = post_params.get(
-                    "content", [db[post_id]["content"]]
-                )[0]
-                self.send_response(200)
-                self.send_header("Content-type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"id": post_id}).encode())
+        if self.path.startswith("/products/"):
+            product_id = int(self.path.split("/")[-1])
+            data = HTTPDataHandler.handle_reader(self)
+            response_data = self.product_service.update_product(product_id, data)
+            if response_data:
+                HTTPDataHandler.handle_response(self, 200, response_data.__dict__)
             else:
-                self.send_error(404, "Publicación no encontrada")
+                HTTPDataHandler.handle_response(
+                    self, 404, {"message": "Producto no encontrado"}
+                )
         else:
-            self.send_error(404, "Ruta no válida")
+            HTTPDataHandler.handle_response(
+                self, 404, {"message": "Ruta no encontrada"}
+            )
 
     def do_DELETE(self):
-        # Eliminar una publicación existente
-        if self.path.startswith("/post/"):
-            post_id = int(self.path.split("/")[-1])
-            if post_id in db:
-                del db[post_id]
-                self.send_response(204)
-                self.end_headers()
+        if self.path.startswith("/products/"):
+            product_id = int(self.path.split("/")[-1])
+            response_data = self.product_service.delete_product(product_id)
+            if response_data:
+                HTTPDataHandler.handle_response(self, 200, response_data)
             else:
-                self.send_error(404, "Publicación no encontrada")
+                HTTPDataHandler.handle_response(
+                    self, 404, {"message": "Producto no encontrado"}
+                )
         else:
-            self.send_error(404, "Ruta no válida")
+            HTTPDataHandler.handle_response(
+                self, 404, {"message": "Ruta no encontrada"}
+            )
 
 
-def run_server(server_class=HTTPServer, handler_class=BlogHandler, port=8000):
-    server_address = ("", port)
-    httpd = server_class(server_address, handler_class)
-    print(f"Starting server on port {port}...")
-    httpd.serve_forever()
+def main():
+    try:
+        server_address = ("", 8000)
+        httpd = HTTPServer(server_address, ProductRequestHandler)
+        print("Iniciando servidor HTTP en puerto 8000...")
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("Apagando servidor HTTP")
+        httpd.socket.close()
 
 
 if __name__ == "__main__":
-    run_server()
+    main()
