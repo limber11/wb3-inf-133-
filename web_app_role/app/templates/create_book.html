@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="subtitle is-2">Registrar Libro</h2>
+<form method="post">
+    <div class="field">
+        <label for="title">Título:</label>
+        <div class="control">
+            <input type="text" id="title" name="title" required class="input">
+        </div>
+    </div>
+    <div class="field">
+        <label for="author">Autor:</label>
+        <div class="control">
+            <input type="text" id="author" name="author" required class="input">
+        </div>
+    </div>
+    <div class="field">
+        <label for="year">Año:</label>
+        <div class="control">
+            <input type="number" id="year" name="year" required class="input">
+        </div>
+    </div>
+    <input type="submit" value="Registrar" class="button is-primary">
+</form>
+{% endblock %}
